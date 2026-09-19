@@ -1,0 +1,57 @@
+name: Cleanup
+
+# Deletes Release runs (and their logs) from the public Actions history.
+#
+# - Automatically after each Release run: deleted if it succeeded; failed or
+#   cancelled runs are kept so their logs can be inspected.
+# - Manually: deletes all successful Release runs, plus failed/cancelled ones
+#   when include_failed is true (save their logs first):
+#     gh workflow run cleanup.yml -R davidreis97/bolt-desktop-releases -f include_failed=true
+#
+# Each run also deletes earlier Cleanup runs, so at most one stays visible.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      include_failed:
+        description: Also delete failed and cancelled Release runs
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete finished Release run
+        if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+        run: gh run delete "${{ github.event.workflow_run.id }}"
+
+      - name: Delete Release runs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INCLUDE_FAILED: ${{ inputs.include_failed }}
+        run: |
+          gh run list --workflow release.yml --limit 1000 --json databaseId,status,conclusion \
+            | jq -r --argjson failed "$INCLUDE_FAILED" \
+                '.[] | select(.status == "completed" and (.conclusion == "success" or $failed)) | .databaseId' \
+            | while read -r id; do
+                echo "Deleting Release run $id"
+                gh run delete "$id"
+              done
+
+      - name: Delete earlier Cleanup runs
+        run: |
+          gh run list --workflow cleanup.yml --limit 1000 --json databaseId,status \
+            | jq -r --argjson self "${{ github.run_id }}" \
+                '.[] | select(.status == "completed" and .databaseId != $self) | .databaseId' \
+            | while read -r id; do gh run delete "$id"; done
