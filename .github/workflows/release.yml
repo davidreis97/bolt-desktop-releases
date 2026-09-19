@@ -94,7 +94,14 @@ jobs:
           for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
-          npm run release
+          # Without a Developer ID cert, ad-hoc sign the mac app. Otherwise it
+          # keeps Electron's stock signature, which packaging invalidates, and
+          # macOS reports the app as "damaged" with no way to open it.
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ -z "${CSC_LINK:-}" ]; then
+            extra=(-c.mac.identity=- -c.mac.hardenedRuntime=false)
+          fi
+          npm run release -- "${extra[@]}"
         env:
           # Optional macOS signing + notarization. Without these the mac
           # build is unsigned and macOS auto-update will not work.
