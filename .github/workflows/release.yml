@@ -1,0 +1,105 @@
+name: Release
+
+# Builds the BOLT desktop client from the private davidreis97/bolt repo
+# (bolt-desktop/) and publishes installers here, where the app's
+# auto-updater looks for them. The release is created as a draft and only
+# published once every platform has uploaded, so clients never see a
+# partial release.
+#
+# Run with: gh workflow run release.yml -R davidreis97/bolt-desktop-releases [-f ref=<branch|tag|sha>]
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref of davidreis97/bolt to build
+        default: main
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: davidreis97/bolt
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.BOLT_DEPLOY_KEY }}
+          sparse-checkout: bolt-desktop/package.json
+          sparse-checkout-cone-mode: false
+
+      - id: version
+        run: echo "tag=v$(node -p "require('./bolt-desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          case "$draft" in
+            false)
+              echo "::error::$TAG is already published. Bump the version in bolt-desktop/package.json."
+              exit 1 ;;
+            true)
+              echo "Reusing existing draft $TAG" ;;
+            missing)
+              gh release create "$TAG" --draft --title "$TAG" --target main \
+                --notes "Built from davidreis97/bolt@${{ inputs.ref }}" ;;
+          esac
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: bolt-desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: davidreis97/bolt
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.BOLT_DEPLOY_KEY }}
+          sparse-checkout: bolt-desktop
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bolt-desktop/package-lock.json
+
+      - run: npm ci
+
+      - name: Build and upload to draft release
+        run: npm run release
+        env:
+          # Optional macOS signing + notarization. Without these the mac
+          # build is unsigned and macOS auto-update will not work.
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        run: gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false --latest
