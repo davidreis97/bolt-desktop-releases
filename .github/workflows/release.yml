@@ -56,7 +56,7 @@ jobs:
             true)
               echo "Reusing existing draft $TAG" ;;
             missing)
-              gh release create "$TAG" --draft --title "$TAG" \
+              gh release create "$TAG" --draft --title "$TAG" --target main \
                 --notes "Built from davidreis97/bolt@${{ inputs.ref }}" ;;
           esac
 
