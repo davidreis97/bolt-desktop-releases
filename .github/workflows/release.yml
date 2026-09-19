@@ -87,7 +87,14 @@ jobs:
       - run: npm ci
 
       - name: Build and upload to draft release
-        run: npm run release
+        shell: bash
+        # Unset secrets are passed as empty strings, which electron-builder
+        # treats as set (e.g. CSC_LINK="" resolves to the project dir).
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          npm run release
         env:
           # Optional macOS signing + notarization. Without these the mac
           # build is unsigned and macOS auto-update will not work.
