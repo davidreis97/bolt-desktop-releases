@@ -42,13 +42,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - id: version
-        run: |
-          if [ ! -f bolt-desktop/package.json ]; then
-            echo "::error::bolt-desktop/package.json not found at davidreis97/bolt@${{ inputs.ref }}. Is bolt-desktop pushed?"
-            exit 1
-          fi
-          version=$(node -p "require('./bolt-desktop/package.json').version")
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+        run: echo "tag=v$(node -p "require('./bolt-desktop/package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Create draft release
         env:
