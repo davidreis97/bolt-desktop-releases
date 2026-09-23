@@ -6,7 +6,17 @@ name: Release
 # published once every platform has uploaded, so clients never see a
 # partial release.
 #
-# Run with: gh workflow run release.yml -R davidreis97/bolt-desktop-releases [-f ref=<branch|tag|sha>]
+# Since the native game (bolt docs/RUNBOOK.md, "Desktop app") the desktop
+# bundles code from the whole repo: the game worker is built from
+# core/, shared/ and bolt/src, and the Windows build carries the bolt-native
+# Node addon (Rust, renderer/). So the full repo is checked out, the root
+# workspace installed, core/shared built, and Windows compiles the addon.
+#
+# Run with: gh workflow run release.yml -R davidreis97/bolt-desktop-releases [-f ref=<branch|tag|sha>] [-f publish=false]
+#
+# publish=false leaves the release as a draft: installers can be downloaded
+# for testing, and the auto-updater (which only sees published releases)
+# does not offer it to anyone.
 
 on:
   workflow_dispatch:
@@ -15,6 +25,10 @@ on:
         description: Ref of davidreis97/bolt to build
         default: main
         required: true
+      publish:
+        description: Publish when every platform has uploaded (false keeps a draft for testing)
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -70,19 +84,45 @@ jobs:
     defaults:
       run:
         working-directory: bolt-desktop
+    env:
+      # npm scripts use POSIX commands (`rm -rf`): run them in Git Bash on Windows too.
+      npm_config_script_shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
           repository: davidreis97/bolt
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.BOLT_DEPLOY_KEY }}
-          sparse-checkout: bolt-desktop
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: bolt-desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            bolt-desktop/package-lock.json
+
+      # The game worker bundles core/, shared/, bolt/src and boltgame.js/src
+      # (bolt-desktop/scripts/build-worker.mjs) from the root workspace.
+      - name: Install and build the shared packages
+        working-directory: .
+        run: |
+          npm ci
+          npm run build -w @bolt/core
+          npm run build -w @bolt/shared
+
+      # Windows: the native game's addon. renderer/rust-toolchain.toml pins
+      # the toolchain; rustup installs it on first use.
+      - name: Rust cache
+        if: runner.os == 'Windows'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: renderer
+
+      - name: Build the bolt-native addon
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: npm run build:addon -w @bolt/render
 
       - run: npm ci
 
@@ -113,6 +153,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
+    if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
     steps:
       - name: Publish release
