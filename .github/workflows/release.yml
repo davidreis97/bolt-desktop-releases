@@ -8,9 +8,11 @@ name: Release
 #
 # Since the native game (bolt docs/RUNBOOK.md, "Desktop app") the desktop
 # bundles code from the whole repo: the game worker is built from
-# core/, shared/ and bolt/src, and the Windows build carries the bolt-native
-# Node addon (Rust, renderer/). So the full repo is checked out, the root
-# workspace installed, core/shared built, and Windows compiles the addon.
+# core/, shared/ and bolt/src, and the Windows and macOS builds carry the
+# bolt-native Node addon (Rust, renderer/). So the full repo is checked out,
+# the root workspace installed, core/shared built, and Windows and macOS
+# compile the addon. macOS builds are Apple silicon (arm64) only, the
+# runner's architecture: bolt-desktop/package.json no longer targets x64.
 #
 # Run with: gh workflow run release.yml -R davidreis97/bolt-desktop-releases [-f ref=<branch|tag|sha>] [-f publish=false]
 #
@@ -111,16 +113,16 @@ jobs:
           npm run build -w @bolt/core
           npm run build -w @bolt/shared
 
-      # Windows: the native game's addon. renderer/rust-toolchain.toml pins
-      # the toolchain; rustup installs it on first use.
+      # Windows and macOS: the native game's addon. renderer/rust-toolchain.toml
+      # pins the toolchain; rustup installs it on first use.
       - name: Rust cache
-        if: runner.os == 'Windows'
+        if: runner.os != 'Linux'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: renderer
 
       - name: Build the bolt-native addon
-        if: runner.os == 'Windows'
+        if: runner.os != 'Linux'
         working-directory: .
         run: npm run build:addon -w @bolt/render
 
